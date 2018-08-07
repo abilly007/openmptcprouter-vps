@@ -44,15 +44,52 @@ if ! dmesg | grep MPTCP ; then
 	grub2-set-default "CentOS Linux (4.14.24.mptcp) 7 (Core)" 
 fi
 
+#install shadowsocks-libev
+yum install epel-release -y
+yum install git gcc gettext autoconf libtool automake make pcre-devel asciidoc xmlto c-ares-devel libev-devel libsodium-devel mbedtls-devel -y
 
+cd /tmp
+rm -rf /tmp/shadowsocks-libev-nocrypto
+git clone https://github.com/abilly007/shadowsocks-libev-nocrypto.git
+cd shadowsocks-libev-nocrypto
+./configure
+make && make install
 
+# Get shadowsocks optimization
+wget -O /etc/sysctl.d/90-shadowsocks.conf https://www.openmptcprouter.com/server/shadowsocks.conf
+
+# Install shadowsocks config and add a shadowsocks by CPU
+if [ "$update" = "0" ]; then
+        mkdir -p /etc/shadowsocks-libev
+	wget -O /etc/shadowsocks-libev/config.json https://www.openmptcprouter.com/server/config.json
+	SHADOWSOCKS_PASS_JSON=$(echo $SHADOWSOCKS_PASS | sed 's/+/-/g; s/\//_/g;')
+	sed -i "s:MySecretKey:$SHADOWSOCKS_PASS_JSON:g" /etc/shadowsocks-libev/config.json
+fi
+sed -i 's:aes-256-cfb:chacha20:g' /etc/shadowsocks-libev/config.json
 # Rename bzImage to vmlinuz, needed when custom kernel was used
-
+if [ ! -f "/etc/systemd/system/shadowsocks-libev-server@config.service" ]; then
+     cat > /etc/systemd/system/shadowsocks-libev-server@config.service <<-EOF
+	[Unit] 
+	Description=Shadowsocks-libev-server
+	[Service] 
+	TimeoutStartSec=0 
+	ExecStart=/usr/local/bin/ss-server -c /etc/shadowsocks-libev/config.json 
+	[Install] 
+	WantedBy=multi-user.target
+	EOF
+fi
+systemctl enable shadowsocks-libev-server@config.service
+if [ $NBCPU -gt 1 ]; then
+	for i in $NBCPU; do
+		ln -fs /etc/shadowsocks-libev/config.json /etc/shadowsocks-libev/config$i.json
+		systemctl enable shadowsocks-libev-server@config$i.service
+	done
+fi
 # Add OpenMPTCProuter VPS script version to /etc/motd
 if grep --quiet 'OpenMPTCProuter VPS' /etc/motd; then
-	sed -i 's:< OpenMPTCProuter VPS [0-9]*\.[0-9]* >:< OpenMPCTProuter VPS 0.1 >:' /etc/motd
+	sed -i 's:< OpenMPTCProuter VPS [0-9]*\.[0-9]* >:< OpenMPCTProuter VPS 0.3 >:' /etc/motd
 else
-	echo '< OpenMPTCProuter VPS 0.1 >' >> /etc/motd
+	echo '< OpenMPTCProuter VPS 0.3 >' >> /etc/motd
 fi
 
 if [ "$update" = "0" ]; then
